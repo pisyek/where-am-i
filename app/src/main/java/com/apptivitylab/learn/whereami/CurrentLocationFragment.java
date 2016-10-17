@@ -1,7 +1,5 @@
 package com.apptivitylab.learn.whereami;
 
-import android.*;
-import android.Manifest;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
@@ -18,23 +16,37 @@ import android.widget.TextView;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.location.FusedLocationProviderApi;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.maps.CameraUpdate;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.OnMapReadyCallback;
+import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.Circle;
+import com.google.android.gms.maps.model.CircleOptions;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
+import com.google.android.gms.maps.model.MarkerOptions;
 
 /**
  * Created by aarief on 13/10/2016.
  */
 
 public class CurrentLocationFragment extends Fragment implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, LocationListener {
+    private GoogleApiClient mGoogleApiClient;
+    private SupportMapFragment mMapFragment;
+    private GoogleMap mGoogleMap;
+
+    private Marker mLocationMarker;
+    private Circle mLocationCircle;
+
     private TextView mLatitudeTextView;
     private TextView mLongitudeTextView;
     private TextView mAccuracyTextView;
     private Button mStopButton;
     private Button mStartButton;
-
-    private GoogleApiClient mGoogleApiClient;
 
     @Nullable
     @Override
@@ -47,13 +59,43 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
         mStopButton = (Button) view.findViewById(R.id.fragment_current_location_button_stop);
         mStartButton = (Button) view.findViewById(R.id.fragment_current_location_button_start);
 
+        if (savedInstanceState == null) {
+            setupGoogleMapsFragment();
+        } else {
+            mMapFragment = (SupportMapFragment) getActivity().getSupportFragmentManager().findFragmentById(R.id.fragment_current_location_vg_map);
+        }
+
         return view;
     }
+
+    private void setupGoogleMapsFragment() {
+        mMapFragment = SupportMapFragment.newInstance();
+
+        getActivity().getSupportFragmentManager()
+                .beginTransaction()
+                .add(R.id.fragment_current_location_vg_map, mMapFragment)
+                .commit();
+
+        mMapFragment.getMapAsync(new OnMapReadyCallback() {
+            @Override
+            public void onMapReady(GoogleMap googleMap) {
+                mGoogleMap = googleMap;
+
+                LatLng officeLatLng = new LatLng(4.2105, 101.9758);
+                CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngZoom(officeLatLng, 6);
+
+                mGoogleMap.moveCamera(cameraUpdate);
+            }
+        });
+
+    }
+
 
     @Override
     public void onViewCreated(View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        // Create an instance of GoogleAPIClient.
         if (mGoogleApiClient == null) {
             mGoogleApiClient = new GoogleApiClient.Builder(getContext(), this, this)
                     .addApi(LocationServices.API)
@@ -63,7 +105,7 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
         mStopButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, CurrentLocationFragment.this);
+                stopLocationUpdates();
             }
         });
 
@@ -76,15 +118,43 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
     }
 
     @Override
+    public void onStart() {
+        super.onStart();
+        mGoogleApiClient.connect();
+    }
+
+    @Override
     public void onStop() {
         super.onStop();
         mGoogleApiClient.disconnect();
     }
 
-    @Override
-    public void onStart() {
-        super.onStart();
-        mGoogleApiClient.connect();
+    private void startLocationUpdates() {
+        if (mGoogleApiClient.isConnected()) {
+            if (ActivityCompat.checkSelfPermission(getContext(), android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(getActivity(), new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION}, 100);
+                return;
+            }
+
+            LocationRequest locationRequest = new LocationRequest();
+            locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+            locationRequest.setInterval(5000);
+
+            LocationServices.FusedLocationApi.requestLocationUpdates(
+                    mGoogleApiClient,
+                    locationRequest,
+                    this
+            );
+        } else {
+            Snackbar.make(getView(), "GoogleApiClient is not ready yet", Snackbar.LENGTH_LONG).show();
+        }
+    }
+
+    private void stopLocationUpdates() {
+        LocationServices.FusedLocationApi.removeLocationUpdates(
+                mGoogleApiClient,
+                CurrentLocationFragment.this
+        );
     }
 
     @Override
@@ -96,30 +166,9 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             startLocationUpdates();
         }
-
     }
 
-    private void startLocationUpdates() {
-        if (mGoogleApiClient.isConnected()) {
-            // Marshmallow only: check for permissions
-            if (ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // request for permission
-                ActivityCompat.requestPermissions(getActivity(), new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION}, 100);
-                return;
-            }
-
-            // Create location request object
-            LocationRequest request = new LocationRequest();
-            request.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-            request.setInterval(5000);
-
-            // Request location updates from FusedLocationApi
-            LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient, request, this);
-        } else {
-            Snackbar.make(getView(), "GoogleApiClient is not ready yet", Snackbar.LENGTH_LONG).show();
-        }
-    }
-
+    //region GoogleApiClient.ConnectionCallbacks
     @Override
     public void onConnected(@Nullable Bundle bundle) {
 
@@ -129,12 +178,17 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
     public void onConnectionSuspended(int i) {
 
     }
+    //endregion
 
+
+    //region GoogleApiClient.OnConnectionFailedListener
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
 
     }
+    //endregion
 
+    //region LocationListener
     @Override
     public void onLocationChanged(Location location) {
         Snackbar.make(getView(), "Location update received!", Snackbar.LENGTH_SHORT).show();
@@ -146,5 +200,26 @@ public class CurrentLocationFragment extends Fragment implements GoogleApiClient
         mLatitudeTextView.setText(latitudeString);
         mLongitudeTextView.setText(longitudeString);
         mAccuracyTextView.setText(accuracyString);
+
+        LatLng userLatLng = new LatLng(location.getLatitude(), location.getLongitude());
+
+        if (mLocationMarker == null) {
+            MarkerOptions markerOptions = new MarkerOptions().position(userLatLng).title("Here I am!");
+            mLocationMarker = mGoogleMap.addMarker(markerOptions);
+        } else {
+            mLocationMarker.setPosition(userLatLng);
+        }
+
+        if (mLocationCircle == null) {
+            CircleOptions circleOptions = new CircleOptions().center(userLatLng).radius(location.getAccuracy());
+            mLocationCircle = mGoogleMap.addCircle(circleOptions);
+        } else {
+            mLocationCircle.setCenter(userLatLng);
+            mLocationCircle.setRadius(location.getAccuracy());
+        }
+
+        CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngZoom(userLatLng, 16);
+        mGoogleMap.moveCamera(cameraUpdate);
     }
+    //endregion
 }
